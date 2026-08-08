@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'; script-src * 'unsafe-inline' 'unsafe-eval';">
+    <title>Control de Presión</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --glass-bg: rgba(255, 255, 255, 0.15);
+            --glass-border: rgba(255, 255, 255, 0.3);
+            --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.2);
+            --text-dark: #2c3e50;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0; padding: 20px;
+            background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%);
+            color: var(--text-dark); min-height: 100vh;
+        }
+
+        .container { max-width: 1200px; margin: auto; display: grid; grid-template-columns: 1fr; gap: 20px; }
+        @media (min-width: 900px) { .container { grid-template-columns: 350px 1fr; } }
+
+        .glass-card {
+            background: var(--glass-bg); backdrop-filter: blur(12px);
+            border-radius: 15px; border: 1px solid var(--glass-border);
+            box-shadow: var(--glass-shadow); padding: 25px; margin-bottom: 20px;
+        }
+
+        h2, h3 { margin-top: 0; border-bottom: 2px solid var(--glass-border); padding-bottom: 10px; }
+        .form-group { margin-bottom: 10px; }
+        
+        input, select, button {
+            width: 100%; padding: 10px; border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            background: rgba(255, 255, 255, 0.6); box-sizing: border-box;
+            font-family: inherit;
+        }
+        
+        .flex-row { display: flex; gap: 10px; align-items: center; }
+        .btn-save { background: #4CAF50; color: white; font-weight: bold; margin-top: 10px; cursor: pointer; border:none; }
+        .btn-save:hover { background: #45a049; }
+        
+        .chart-container { position: relative; height: 400px; width: 100%; margin-bottom: 20px; }
+        #toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 9999; }
+        .toast { 
+            background: white; padding: 10px 20px; border-radius: 5px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2); margin-top: 5px; border-left: 5px solid #4CAF50;
+            animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        /* Estilos para el Modal de Confirmación */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(5px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+        }
+
+        .modal-content {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: var(--glass-shadow);
+            text-align: center;
+            max-width: 300px;
+            border: 1px solid var(--glass-border);
+        }
+
+        .modal-buttons { display: flex; gap: 10px; margin-top: 20px; }
+        .btn-confirm { background: #e74c3c; color: white; border: none; padding: 10px; border-radius: 8px; cursor: pointer; flex: 1; }
+        .btn-cancel { background: #bdc3c7; color: white; border: none; padding: 10px; border-radius: 8px; cursor: pointer; flex: 1; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="glass-card">
+        <h2>📋 Registro Diario</h2>
+        
+        <div class="flex-row" style="margin-bottom: 20px;">
+            <input type="text" id="calendar-input" class="form-control" placeholder="Seleccione una fecha">
+        </div>
+        <input type="hidden" id="fecha">
+
+        <h3>❤️ Presión Arterial</h3>
+        <DIV style="border-radius: solid 8px; padding: 10px; background: #2980b9">
+            <select id="momento" style="background: gainsboro;">
+                <option value="Mañana">🌅 Mañana</option>
+                <option value="Tarde">☀️ Tarde</option>
+                <option value="Noche">🌙 Noche</option>
+            </select>
+            <div class="flex-row" style="margin-top:5px;">
+                <input type="number" id="sys" placeholder="SYS" style="background: gainsboro;">
+                <input type="number" id="dia" placeholder="DIA" style="background: gainsboro;">
+                <input type="number" id="pulso" placeholder="PULSO" style="background: gainsboro;">
+            </div>
+        </DIV>
+        <div style="display:flex; gap: 17px">
+            <div>
+                <button class="btn-save" onclick="guardarPresion()">💾 Guardar Presión</button>
+            </div>
+            <div>
+                <button class="btn-save" onclick="abrirModalEliminar()" style="background:#e74c3c;">🗑️ Borrar Entrada</button>
+            </div>
+        </div>
+    </div>
+
+    <<div class="glass-card">
+        <h2>📈 Evolución de Presión</h2>
+        <div class="chart-container">
+            <canvas id="bpChart"></canvas>
+        </div>
+        
+        <!-- NUEVOS BOTONES DE EXPORTAR E IMPORTAR -->
+        <h3 style="margin-top: 30px;">💾 Gestión de Datos</h3>
+        <div style="display:flex; gap: 15px;">
+            <button class="btn-save" style="background:#f39c12;" onclick="exportarDatos()">📥 Exportar BD (JSON)</button>
+            <button class="btn-save" style="background:#8e44ad;" onclick="document.getElementById('import-file').click()">📤 Importar BD</button>
+            <input type="file" id="import-file" style="display:none" accept=".json" onchange="importarDatos(event)">
+        </div>
+
+        <div id="stats-container" style="display: flex; gap: 30px; flex-wrap: wrap; margin-top: 20px;"></div>
+    </div>
+</div>
+
+<div id="toast-container"></div>
+
+<div id="confirmModal" class="modal-overlay">
+    <div class="modal-content">
+        <h3 style="border:none;">¿Eliminar registro?</h3>
+        <p id="modal-text">¿Estás seguro de que deseas borrar esta lectura?</p>
+        <div class="modal-buttons">
+            <button class="btn-confirm" id="btn-confirm-delete">Eliminar</button>
+            <button class="btn-cancel" onclick="cerrarModal()">Cancelar</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ==================== VARIABLES GLOBALES ====================
+    let bpChart = null;
+    let flatpickrInstance = null;
+    let datosGlobales = {}; 
+    const inputFecha = document.getElementById('fecha');
+
+    // ==================== INICIALIZACIÓN ====================
+    document.addEventListener('DOMContentLoaded', () => {
+        inicializarCalendario();
+        cargarDatosLocal(); // Carga la BD desde localStorage y dibuja el gráfico
+        // Simular carga de datos inicial (esto dependerá de tu API)
+        // cargarDatosDesdeServidor();
+    });
+
+    function inicializarCalendario() {
+        const hoy = new Date();
+        
+        flatpickrInstance = flatpickr("#calendar-input", {
+            dateFormat: "d/m/Y",
+            defaultDate: hoy,
+            locale: {
+                firstDayOfWeek: 1,
+                weekdays: {
+                    shorthand: ['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sa'],
+                    longhand: ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
+                },
+                months: {
+                    shorthand: ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
+                    longhand: ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+                }
+            },
+            onChange: function(selectedDates) {
+                if (selectedDates.length > 0) {
+                    const fechaISO = selectedDates[0].toISOString().split('T')[0];
+                    inputFecha.value = fechaISO;
+                }
+            }
+        });
+
+        inputFecha.value = hoy.toISOString().split('T')[0];
+    }
+
+    // ==================== FUNCIONES DE STORAGE ====================
+    function obtenerDatos() { 
+        return datosGlobales; 
+    }
+    
+    // Cargar datos guardados al iniciar la página
+    function cargarDatosLocal() {
+        const guardado = localStorage.getItem('presionDatos');
+        if (guardado) {
+            datosGlobales = JSON.parse(guardado);
+            actualizarGraficoPrincipal();
+        }
+    }
+
+    // Guarda en la memoria del navegador inmediatamente
+    function guardarEnBD(fecha) {
+        try {
+            localStorage.setItem('presionDatos', JSON.stringify(datosGlobales));
+            actualizarGraficoPrincipal(); 
+        } catch (error) {
+            console.error('❌ Error guardando localmente:', error);
+            mostrarToast('Error al guardar los datos', 'error');
+        }
+    }
+
+    // Exporta la variable datosGlobales a un archivo .json
+    function exportarDatos() {
+        if (Object.keys(datosGlobales).length === 0) {
+            return mostrarToast('No hay datos para exportar', 'warning');
+        }
+        
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(datosGlobales, null, 2));
+        const downloadAnchorNode = document.createElement('a');
+        const fechaHoy = new Date().toISOString().split('T')[0];
+        
+        downloadAnchorNode.setAttribute("href",     dataStr);
+        downloadAnchorNode.setAttribute("download", `presion_bd_${fechaHoy}.json`);
+        document.body.appendChild(downloadAnchorNode);
+        downloadAnchorNode.click();
+        downloadAnchorNode.remove();
+        mostrarToast('Base de datos exportada', 'success');
+    }
+
+    // Lee un archivo .json subido por el usuario y reemplaza la base de datos
+    function importarDatos(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const jsonParseado = JSON.parse(e.target.result);
+                datosGlobales = jsonParseado; // Reemplaza los datos actuales
+                guardarEnBD(); // Guarda en localStorage
+                mostrarToast('Datos importados correctamente', 'success');
+            } catch (error) {
+                console.error('Error al parsear el JSON:', error);
+                mostrarToast('Archivo inválido o corrupto', 'error');
+            }
+            // Resetea el input para permitir volver a importar el mismo archivo si es necesario
+            event.target.value = ''; 
+        };
+        reader.readAsText(file);
+    }
+
+    function mostrarToast(msg, tipo = 'success') {
+        const div = document.createElement('div');
+        div.className = 'toast';
+        div.innerText = msg;
+        if (tipo === 'error') div.style.borderLeftColor = '#dc3545';
+        if (tipo === 'warning') div.style.borderLeftColor = '#ffc107';
+        document.getElementById('toast-container').appendChild(div);
+        setTimeout(() => div.remove(), 3000);
+    }
+
+    // ==================== FUNCIONES DE PRESIÓN ====================
+    function guardarPresion() {
+        const fecha = inputFecha.value;
+        if (!fecha) return mostrarToast('Seleccione una fecha', 'error');
+        
+        const momento = document.getElementById('momento').value;
+        const sys = parseInt(document.getElementById('sys').value);
+        const dia = parseInt(document.getElementById('dia').value);
+        const pulso = parseInt(document.getElementById('pulso').value) || 0;
+        
+        if (!sys || !dia) return mostrarToast('Complete SYS y DIA', 'warning');
+        
+        if (!datosGlobales[fecha]) {
+            datosGlobales[fecha] = { presion: {} };
+        }
+        
+        if (!datosGlobales[fecha].presion) {
+            datosGlobales[fecha].presion = {};
+        }
+        
+        datosGlobales[fecha].presion[momento] = { 
+            sys: sys, 
+            dia: dia, 
+            pulso: pulso 
+        };
+        
+        guardarEnBD(fecha);
+        mostrarToast(`✅ Presión (${momento}) guardada - SYS:${sys} DIA:${dia} Pulso:${pulso}`);
+        
+        document.getElementById('sys').value = '';
+        document.getElementById('dia').value = '';
+        document.getElementById('pulso').value = '';
+    }
+
+    // Lógica básica para eliminar
+    function abrirModalEliminar() {
+        const fecha = inputFecha.value;
+        const momento = document.getElementById('momento').value;
+        if(datosGlobales[fecha] && datosGlobales[fecha].presion && datosGlobales[fecha].presion[momento]) {
+            document.getElementById('confirmModal').style.display = 'flex';
+            document.getElementById('btn-confirm-delete').onclick = () => {
+                delete datosGlobales[fecha].presion[momento];
+                guardarEnBD(fecha);
+                cerrarModal();
+                mostrarToast('Lectura eliminada', 'success');
+            };
+        } else {
+            mostrarToast('No hay registros para este momento', 'warning');
+        }
+    }
+
+    function cerrarModal() {
+        document.getElementById('confirmModal').style.display = 'none';
+    }
+
+    // ==================== GRÁFICO PRINCIPAL ====================
+    // ==================== GRÁFICO PRINCIPAL ====================
+    function actualizarGraficoPrincipal() {
+        const datos = obtenerDatos();
+        const fechas = Object.keys(datos).sort();
+        const labels = [];
+        const sys = [];
+        const dia = [];
+        const pulso = []; 
+
+        fechas.forEach(f => {
+            if (datos[f].presion) {
+                ['Mañana', 'Tarde', 'Noche'].forEach(m => {
+                    if (datos[f].presion[m]) {
+                        const [year, month, day] = f.split('-');
+                        labels.push(`${day}/${month} (${m.substring(0,1)})`);
+                        sys.push(datos[f].presion[m].sys);
+                        dia.push(datos[f].presion[m].dia);
+                        pulso.push(datos[f].presion[m].pulso || 0); 
+                    }
+                });
+            }
+        });
+
+        const ctx = document.getElementById('bpChart').getContext('2d');
+        
+        if (bpChart) {
+            bpChart.destroy();
+        }
+        
+        if (labels.length === 0) {
+            bpChart = new Chart(ctx, {
+                type: 'line',
+                data: { labels: ['No hay datos'], datasets: [] },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { title: { display: true, text: 'No hay datos de presión.' } }
+                }
+            });
+        } else {
+            const datasets = [
+                { 
+                    label: 'SISTÓLICA (SYS)', 
+                    data: sys, 
+                    borderColor: '#e74c3c', 
+                    backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                    tension: 0.3,
+                    pointBackgroundColor: '#e74c3c',
+                    pointRadius: 4,
+                    borderWidth: 2,
+                    yAxisID: 'y' // Eje principal izquierdo
+                },
+                { 
+                    label: 'DIASTÓLICA (DIA)', 
+                    data: dia, 
+                    borderColor: '#3498db', 
+                    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                    tension: 0.3,
+                    pointBackgroundColor: '#3498db',
+                    pointRadius: 4,
+                    borderWidth: 2,
+                    yAxisID: 'y' // Eje principal izquierdo
+                },
+                { 
+                    label: 'PULSO', 
+                    data: pulso, 
+                    borderColor: '#2ecc71', 
+                    backgroundColor: 'rgba(46, 204, 113, 0.1)',
+                    tension: 0.3,
+                    pointBackgroundColor: '#2ecc71',
+                    pointRadius: 4,
+                    borderWidth: 2,
+                    borderDash: [5, 5],
+                    yAxisID: 'yPulso' // Nuevo eje independiente
+                }
+            ];
+
+            bpChart = new Chart(ctx, {
+                type: 'line',
+                data: { labels, datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            beginAtZero: false,
+                            suggestedMin: 50,
+                            suggestedMax: 160,
+                            title: {
+                                display: true,
+                                text: 'Presión (mmHg)',
+                                color: '#2c3e50'
+                            }
+                        },
+                        yPulso: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            beginAtZero: false,
+                            suggestedMin: 40,
+                            suggestedMax: 120,
+                            title: {
+                                display: true,
+                                text: 'Pulso (lpm)',
+                                color: '#2ecc71'
+                            },
+                            // Esto evita que las líneas de la cuadrícula del pulso 
+                            // se crucen con las de la presión ensuciando el gráfico
+                            grid: {
+                                drawOnChartArea: false 
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+</script>
+</body>
+</html>
